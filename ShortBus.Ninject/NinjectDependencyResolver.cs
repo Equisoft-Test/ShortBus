@@ -6,9 +6,9 @@
 
     public class NinjectDependencyResolver : IDependencyResolver
     {
-        readonly IKernel _container;
+        readonly IReadOnlyKernel _container;
 
-        public NinjectDependencyResolver(IKernel container)
+        public NinjectDependencyResolver(IReadOnlyKernel container)
         {
             _container = container;
         }

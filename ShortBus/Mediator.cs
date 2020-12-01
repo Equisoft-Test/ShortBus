@@ -48,7 +48,7 @@ namespace ShortBus
 
         private List<RequestInterceptor> GetRequestInterceptors<TResponseData>(MediatorPlan<TResponseData> plan)
         {
-            MethodInfo method = plan.HandlerInstance.GetType().GetMethod(plan.HandleMethod.Name, ((IEnumerable<ParameterInfo>)plan.HandleMethod.GetParameters()).Select(info => info.ParameterType).ToArray());
+            MethodInfo method = plan.HandlerInstance.GetType().GetTypeInfo().GetMethod(plan.HandleMethod.Name, ((IEnumerable<ParameterInfo>)plan.HandleMethod.GetParameters()).Select(info => info.ParameterType).ToArray());
             List<RequestInterceptor> requestInterceptorList = new List<RequestInterceptor>();
             foreach (Attribute customAttribute in method.GetCustomAttributes())
             {
