@@ -26,20 +26,43 @@ namespace ShortBus
 
         public virtual Response<TResponseData> Request<TResponseData>(IRequest<TResponseData> request)
         {
-            var response = new Response<TResponseData>();
-
+            Response<TResponseData> response = new Response<TResponseData>();
             try
             {
-                var plan = new MediatorPlan<TResponseData>(typeof (IRequestHandler<,>), "Handle", request.GetType(), _dependencyResolver);
+                var plan = new MediatorPlan<TResponseData>(typeof(IRequestHandler<,>), "Handle", request.GetType(), _dependencyResolver);
+                List<RequestInterceptor> requestInterceptors = GetRequestInterceptors(plan);
 
+                foreach (RequestInterceptor requestInterceptor in requestInterceptors)
+                    requestInterceptor.BeforeInvoke(plan.HandleMethod, request, request.GetType());
                 response.Data = plan.Invoke(request);
-            }
-            catch (Exception e)
-            {
-                response.Exception = e;
-            }
 
+                foreach (RequestInterceptor requestInterceptor in requestInterceptors)
+                    requestInterceptor.AfterInvoke(plan.HandleMethod, request, request.GetType(), response.Data);
+            }
+            catch (Exception ex)
+            {
+                response.Exception = ex;
+            }
             return response;
+        }
+
+        private List<RequestInterceptor> GetRequestInterceptors<TResponseData>(MediatorPlan<TResponseData> plan)
+        {
+            MethodInfo method = plan.HandlerInstance.GetType().GetMethod(plan.HandleMethod.Name, ((IEnumerable<ParameterInfo>)plan.HandleMethod.GetParameters()).Select(info => info.ParameterType).ToArray());
+            List<RequestInterceptor> requestInterceptorList = new List<RequestInterceptor>();
+            foreach (Attribute customAttribute in method.GetCustomAttributes())
+            {
+                if (customAttribute is RequestInterceptAttribute)
+                {
+                    foreach (Type interceptor in ((RequestInterceptAttribute)customAttribute).GetInterceptors())
+                    {
+                        RequestInterceptor instance = (RequestInterceptor)_dependencyResolver.GetInstance(interceptor);
+                        instance.RequestInterceptAttribute = (RequestInterceptAttribute)customAttribute;
+                        requestInterceptorList.Add(instance);
+                    }
+                }
+            }
+            return requestInterceptorList;
         }
 
         public async Task<Response<TResponseData>> RequestAsync<TResponseData>(IAsyncRequest<TResponseData> query)
@@ -47,35 +70,27 @@ namespace ShortBus
             Response<TResponseData> response = new Response<TResponseData>();
             try
             {
-                var plan = new MediatorPlan<TResponseData>(typeof(IAsyncRequestHandler<,>), "HandleAsync", query.GetType(), this._dependencyResolver);
-                var implementationMethod = plan.HandlerInstance.GetType().GetMethod(plan.HandleMethod.Name, ((IEnumerable<ParameterInfo>)plan.HandleMethod.GetParameters()).Select(info => info.ParameterType).ToArray());
-                var interceptors = implementationMethod.GetCustomAttributes()
-                    .Where(attribute => attribute is RequestInterceptAttribute)
-                    .Cast<RequestInterceptAttribute>()
-                    .SelectMany(attribute => attribute.GetInterceptors())
-                    .Select(type => _dependencyResolver.GetInstance(type))
-                    .Cast<RequestInterceptor>()
-                    .ToList();
-                
-                foreach (RequestInterceptor requestInterceptor in interceptors)
-                    requestInterceptor.BeforeInvoke(plan.HandleMethod, query, query.GetType());
+                var plan = new MediatorPlan<TResponseData>(typeof(IAsyncRequestHandler<,>), "HandleAsync", query.GetType(), _dependencyResolver);
+                var interceptors = GetRequestInterceptors(plan);
 
-                response.Data = await plan.InvokeAsync(query);
+                foreach (var requestInterceptor in interceptors)
+                    await requestInterceptor.BeforeInvokeAsync(plan.HandleMethod, query, query.GetType());
 
-                foreach (RequestInterceptor requestInterceptor in interceptors)
-                    requestInterceptor.AfterInvoke(plan.HandleMethod, query, query.GetType(), response.Data);
+                response.Data = await plan.InvokeAsync((object)query);
+
+                foreach (var requestInterceptor in interceptors)
+                    await requestInterceptor.AfterInvokeAsync(plan.HandleMethod, query, query.GetType(), response.Data);
             }
             catch (Exception ex)
             {
                 response.Exception = ex;
             }
-
             return response;
         }
 
         public Response Notify<TNotification>(TNotification notification)
         {
-            IEnumerable<INotificationHandler<TNotification>> instances = this._dependencyResolver.GetInstances<INotificationHandler<TNotification>>();
+            IEnumerable<INotificationHandler<TNotification>> instances = _dependencyResolver.GetInstances<INotificationHandler<TNotification>>();
             Response response = new Response();
             List<Exception> exceptionList = null;
             foreach (INotificationHandler<TNotification> notificationHandler in instances)
